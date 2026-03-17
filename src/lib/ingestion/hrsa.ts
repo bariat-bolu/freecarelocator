@@ -25,14 +25,21 @@ export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
   url.searchParams.set('StateFipsCode', '45');
   url.searchParams.set('Token', token);
 
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    signal: AbortSignal.timeout(30000),
-  });
+  const response = await fetch(
+    'https://data.hrsa.gov/HDWAPI3_External/api/v1/GetHealthCentersByArea',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: new URLSearchParams({
+        StateFipsCode: '45',
+        Token: token,
+      }),
+      signal: AbortSignal.timeout(30000),
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
