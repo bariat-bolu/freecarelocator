@@ -1,0 +1,4 @@
+name,address,city,state,zip,phone,website,hours,services,eligibility,languages,latitude,longitude
+Midlands Free Health Clinic,100 Main St,Columbia,SC,29201,(803) 555-1234,https://example.com/midlands,"Mon-Fri 9am-4pm","Primary Care,Dental,Mental Health","Uninsured adults 18+","English,Spanish",34.0007,-81.0348
+Pee Dee Community Clinic,200 Oak Ave,Florence,SC,29501,843-555-5678,,"Tue/Thu 10am-2pm",Primary Care,All residents,English,34.1954,-79.7626
+Test Clinic No Coords,300 Elm St,Spartanburg,SC,29301,864-555-0000,,,"Vision,Pharmacy",,English,,

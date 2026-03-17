@@ -1,105 +1,192 @@
+'use client';
+
+import { useState, useCallback } from 'react';
+import AuthHeader from '@/components/AuthHeader';
+import SearchBar from '@/components/SearchBar';
+import ClinicFilters from '@/components/ClinicFilters';
+import SearchResults from '@/components/SearchResults';
+import type { Clinic, SearchResponse } from '@/types/clinic';
+
 export default function HomePage() {
+  const [query, setQuery] = useState('');
+  const [radius, setRadius] = useState(10);
+  const [services, setServices] = useState<string[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [pagination, setPagination] = useState<
+    SearchResponse['pagination'] | null
+  >(null);
+
+  const handleSearch = useCallback(
+    async (offset = 0) => {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+
+      setLoading(true);
+      setError(null);
+      setHasSearched(true);
+
+      try {
+        const params = new URLSearchParams({
+          q: trimmed,
+          radius: String(radius),
+          limit: '20',
+          offset: String(offset),
+        });
+
+        if (services.length > 0) {
+          params.set('services', services.join(','));
+        }
+        if (languages.length > 0) {
+          params.set('languages', languages.join(','));
+        }
+
+        const res = await fetch(`/api/search?${params.toString()}`);
+
+        if (res.status === 429) {
+          setError(
+            'You\\u2019re searching too quickly. Please wait a moment and try again.'
+          );
+          setClinics([]);
+          setPagination(null);
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(body.error || `Search failed (${res.status})`);
+          setClinics([]);
+          setPagination(null);
+          return;
+        }
+
+        const data: SearchResponse = await res.json();
+
+        if (offset === 0) {
+          setClinics(data.results);
+        } else {
+          // Append for "Load more"
+          setClinics((prev) => [...prev, ...data.results]);
+        }
+
+        setPagination(data.pagination);
+      } catch {
+        setError('An unexpected error occurred. Please try again.');
+        setClinics([]);
+        setPagination(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [query, radius, services, languages]
+  );
+
+  function handleLoadMore() {
+    if (pagination) {
+      handleSearch(pagination.offset + pagination.limit);
+    }
+  }
+
+  function clearFilters() {
+    setServices([]);
+    setLanguages([]);
+  }
+
+  const activeFilterCount = services.length + languages.length;
+
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* ── Header ── */}
-      <header className="border-sage-muted/40 border-b bg-white/60 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            {/* Leaf mark */}
-            <div
-              className="bg-sage-primary flex h-9 w-9 items-center justify-center rounded-xl"
-              aria-hidden="true"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75" />
-              </svg>
-            </div>
-            <span className="font-display text-sage-primary text-xl font-semibold tracking-tight">
-              FreeCare Locator
-            </span>
-          </div>
+    <div className="bg-sage-bg flex min-h-screen flex-col">
+      <AuthHeader />
 
-          <nav aria-label="Primary">
-            <span className="text-sage-text/50 text-sm">South Carolina</span>
-          </nav>
-        </div>
-      </header>
-
-      {/* ── Hero ── */}
-      <main className="flex flex-1 flex-col">
-        <section className="flex flex-1 items-center justify-center px-6 py-20">
+      <main className="flex-1">
+        {/* Hero + Search */}
+        <section className="border-sage-muted/30 to-sage-bg border-b bg-gradient-to-b from-white px-6 pt-12 pb-8 sm:pt-16">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sage-accent mb-3 text-sm font-medium tracking-widest uppercase">
-              Free &amp; Low-Cost Healthcare
-            </p>
-
-            <h1 className="font-display text-sage-text text-4xl leading-tight font-bold tracking-tight sm:text-5xl md:text-6xl">
+            <h1 className="font-display text-sage-text text-3xl font-bold tracking-tight sm:text-4xl">
               Find care near you
               <span className="text-sage-primary">.</span>
             </h1>
-
-            <p className="text-sage-text/70 mx-auto mt-5 max-w-lg text-lg leading-relaxed">
-              Search community health centers, free clinics, and charitable care
-              across South Carolina — all in one place.
+            <p className="text-sage-text/60 mx-auto mt-3 max-w-lg">
+              Search free and reduced-cost clinics across South Carolina.
             </p>
-
-            {/* Search placeholder — wired up in a later step */}
-            <div className="mx-auto mt-10 max-w-md">
-              <div className="border-sage-muted focus-within:ring-sage-primary/20 flex items-center gap-2 rounded-2xl border bg-white px-5 py-3.5 shadow-sm transition-shadow focus-within:shadow-md focus-within:ring-2">
-                <svg
-                  className="text-sage-muted h-5 w-5 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <input
-                  type="text"
-                  placeholder="City, zip code, or clinic name…"
-                  className="text-sage-text placeholder:text-sage-muted w-full bg-transparent focus:outline-none"
-                  disabled
-                  aria-label="Search clinics (coming soon)"
-                />
-              </div>
-              <p className="text-sage-text/40 mt-2 text-xs">
-                Search will be enabled in the next step.
-              </p>
-            </div>
           </div>
+
+          <div className="mt-8">
+            <SearchBar
+              query={query}
+              radius={radius}
+              onQueryChange={setQuery}
+              onRadiusChange={setRadius}
+              onSearch={() => handleSearch(0)}
+              loading={loading}
+            />
+          </div>
+
+          {/* Filter toggle */}
+          <div className="mx-auto mt-4 flex max-w-2xl justify-center">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="text-sage-text/50 hover:text-sage-primary flex items-center gap-1.5 text-sm transition-colors"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M3 4h18M3 12h18M3 20h18" />
+              </svg>
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="bg-sage-primary flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {showFilters && (
+            <div className="mt-4">
+              <ClinicFilters
+                selectedServices={services}
+                selectedLanguages={languages}
+                onServicesChange={setServices}
+                onLanguagesChange={setLanguages}
+                onClear={clearFilters}
+              />
+            </div>
+          )}
         </section>
 
-        {/* ── Stats ribbon ── */}
-        <section className="border-sage-muted/40 border-t bg-white/40">
-          <div className="mx-auto grid max-w-4xl grid-cols-1 gap-6 px-6 py-10 sm:grid-cols-3">
-            {[
-              { value: '—', label: 'Clinics listed' },
-              { value: '46', label: 'SC counties served' },
-              { value: 'Free', label: 'Always free to use' },
-            ].map((stat) => (
-              <div key={stat.label} className="text-center">
-                <p className="font-display text-sage-primary text-3xl font-bold">
-                  {stat.value}
-                </p>
-                <p className="text-sage-text/60 mt-1 text-sm">{stat.label}</p>
-              </div>
-            ))}
-          </div>
+        {/* Results */}
+        <section className="px-6 py-8">
+          <SearchResults
+            clinics={clinics}
+            loading={loading}
+            error={error}
+            hasSearched={hasSearched}
+          />
+
+          {/* Load more */}
+          {pagination?.has_more && !loading && (
+            <div className="mx-auto mt-6 max-w-2xl text-center">
+              <button
+                onClick={handleLoadMore}
+                className="border-sage-muted text-sage-text/70 hover:border-sage-primary hover:text-sage-primary rounded-xl border px-6 py-2.5 text-sm font-medium transition-colors"
+              >
+                Load more clinics
+              </button>
+            </div>
+          )}
         </section>
       </main>
 
-      {/* ── Footer ── */}
+      {/* Footer */}
       <footer className="border-sage-muted/40 border-t px-6 py-6">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 sm:flex-row">
           <p className="text-sage-text/40 text-xs">
