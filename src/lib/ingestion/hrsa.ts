@@ -8,27 +8,29 @@ import {
   slugify,
 } from './normalize';
 
-// HRSA Health Center API returns JSON with these fields (subset)
+/**
+ * Zod schema matching HRSA Socrata dataset fields
+ */
 const hrsaRecordSchema = z.object({
-  HealthCenterID: z.coerce.string(),
-  HealthCenterName: z.string(),
-  Site_Address: z.string().optional().nullable(),
-  Site_City: z.string().optional().nullable(),
-  Site_State_Abbreviation: z.string().optional().nullable(),
-  Site_Postal_Code: z.string().optional().nullable(),
-  HealthCenterCounty: z.string().optional().nullable(),
-  Site_Telephone_Number: z.string().optional().nullable(),
-  HealthCenterURL: z.string().optional().nullable(),
-  Geocoding_Artifact_Address_Primary_X_Coordinate: z.coerce
+  healthcenterid: z.coerce.string(),
+  healthcentername: z.string(),
+  site_address: z.string().optional().nullable(),
+  site_city: z.string().optional().nullable(),
+  site_state_abbreviation: z.string().optional().nullable(),
+  site_postal_code: z.string().optional().nullable(),
+  healthcentercounty: z.string().optional().nullable(),
+  site_telephone_number: z.string().optional().nullable(),
+  healthcenterurl: z.string().optional().nullable(),
+  geocoding_artifact_address_primary_x_coordinate: z.coerce
     .number()
     .optional()
     .nullable(),
-  Geocoding_Artifact_Address_Primary_Y_Coordinate: z.coerce
+  geocoding_artifact_address_primary_y_coordinate: z.coerce
     .number()
     .optional()
     .nullable(),
-  HealthCenterServiceDeliveryMethods: z.string().optional().nullable(),
-  OperationalStatus: z.string().optional().nullable(),
+  healthcenterservicedeliverymethods: z.string().optional().nullable(),
+  operationalstatus: z.string().optional().nullable(),
 });
 
 type HrsaRecord = z.infer<typeof hrsaRecordSchema>;
@@ -38,32 +40,34 @@ type HrsaRecord = z.infer<typeof hrsaRecordSchema>;
  */
 export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
   const apiKey = process.env.HRSA_API_KEY;
+
   if (!apiKey) {
     throw new Error('HRSA_API_KEY is not configured');
   }
 
-  // HRSA Health Center Service Delivery Sites API
-  // Filter for South Carolina
   const url = new URL(
-    'https://data.hrsa.gov/api/download/healthcenterservicesites'
+    'https://data.hrsa.gov/resource/healthcenterservicesites.json'
   );
-  url.searchParams.set('apikey', apiKey);
-  url.searchParams.set('$filter', "Site_State_Abbreviation eq 'SC'");
-  url.searchParams.set('$top', '5000');
+
+  // SC filter
+  url.searchParams.set('$limit', '5000');
+  url.searchParams.set('$where', "site_state_abbreviation = 'SC'");
 
   const response = await fetch(url.toString(), {
-    headers: { Accept: 'application/json' },
+    headers: {
+      'X-App-Token': apiKey,
+      Accept: 'application/json',
+    },
     signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {
-    throw new Error(
-      `HRSA API returned ${response.status}: ${response.statusText}`
-    );
+    const text = await response.text();
+    throw new Error(`HRSA API returned ${response.status}: ${text}`);
   }
 
   const json = await response.json();
-  const records: unknown[] = Array.isArray(json) ? json : json.value || [];
+  const records: unknown[] = Array.isArray(json) ? json : [];
 
   const clinics: NormalizedClinic[] = [];
 
@@ -71,32 +75,32 @@ export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
     const parsed = hrsaRecordSchema.safeParse(raw);
     if (!parsed.success) continue;
 
-    const r = parsed.data;
+    const r: HrsaRecord = parsed.data;
 
     // Skip non-operational sites
-    if (r.OperationalStatus && r.OperationalStatus !== 'Active') continue;
+    if (r.operationalstatus && r.operationalstatus !== 'Active') continue;
 
-    const lon = r.Geocoding_Artifact_Address_Primary_X_Coordinate ?? null;
-    const lat = r.Geocoding_Artifact_Address_Primary_Y_Coordinate ?? null;
+    const lon = r.geocoding_artifact_address_primary_x_coordinate ?? null;
+    const lat = r.geocoding_artifact_address_primary_y_coordinate ?? null;
 
     clinics.push({
       source: 'HRSA',
-      source_id: r.HealthCenterID,
-      name: r.HealthCenterName,
-      slug: slugify(r.HealthCenterName),
+      source_id: r.healthcenterid,
+      name: r.healthcentername,
+      slug: slugify(r.healthcentername),
       description: null,
-      phone: normalizePhone(r.Site_Telephone_Number),
+      phone: normalizePhone(r.site_telephone_number),
       email: null,
-      website: normalizeUrl(r.HealthCenterURL),
-      address_line1: r.Site_Address?.trim() || null,
+      website: normalizeUrl(r.healthcenterurl),
+      address_line1: r.site_address?.trim() || null,
       address_line2: null,
-      city: r.Site_City?.trim() || null,
-      state: r.Site_State_Abbreviation?.trim() || 'SC',
-      zip: normalizeZip(r.Site_Postal_Code),
-      county: r.HealthCenterCounty?.trim() || null,
+      city: r.site_city?.trim() || null,
+      state: r.site_state_abbreviation?.trim() || 'SC',
+      zip: normalizeZip(r.site_postal_code),
+      county: r.healthcentercounty?.trim() || null,
       latitude: lat,
       longitude: lon,
-      services: toArray(r.HealthCenterServiceDeliveryMethods, ';'),
+      services: toArray(r.healthcenterservicedeliverymethods, ';'),
       languages: ['English'],
       hours_json: null,
       eligibility: 'All residents regardless of ability to pay.',
@@ -104,7 +108,7 @@ export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
       sliding_scale: true,
       cost: 'Sliding scale based on income.',
       docs_needed: null,
-      is_approved: true, // HRSA data is trusted
+      is_approved: true,
     });
   }
 
