@@ -1,106 +1,70 @@
-import { z } from 'zod';
 import type { NormalizedClinic } from './upsert-engine';
 import {
   normalizePhone,
   normalizeUrl,
   normalizeZip,
-  toArray,
   slugify,
 } from './normalize';
 
 /**
- * Zod schema matching HRSA Socrata dataset fields
- */
-const hrsaRecordSchema = z.object({
-  healthcenterid: z.coerce.string(),
-  healthcentername: z.string(),
-  site_address: z.string().optional().nullable(),
-  site_city: z.string().optional().nullable(),
-  site_state_abbreviation: z.string().optional().nullable(),
-  site_postal_code: z.string().optional().nullable(),
-  healthcentercounty: z.string().optional().nullable(),
-  site_telephone_number: z.string().optional().nullable(),
-  healthcenterurl: z.string().optional().nullable(),
-  geocoding_artifact_address_primary_x_coordinate: z.coerce
-    .number()
-    .optional()
-    .nullable(),
-  geocoding_artifact_address_primary_y_coordinate: z.coerce
-    .number()
-    .optional()
-    .nullable(),
-  healthcenterservicedeliverymethods: z.string().optional().nullable(),
-  operationalstatus: z.string().optional().nullable(),
-});
-
-type HrsaRecord = z.infer<typeof hrsaRecordSchema>;
-
-/**
- * Fetch HRSA Health Centers for South Carolina.
+ * Fetch HRSA Health Centers for South Carolina
+ * using HDWAPI3 endpoint
  */
 export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
-  const apiKey = process.env.HRSA_API_KEY;
+  const token = process.env.HRSA_API_KEY;
 
-  if (!apiKey) {
+  if (!token) {
     throw new Error('HRSA_API_KEY is not configured');
   }
 
   const url = new URL(
-    'https://data.hrsa.gov/resource/healthcenterservicesites.json'
+    'https://data.hrsa.gov/HDWAPI3_External/api/v1/GetHealthCentersByArea'
   );
 
-  // SC filter
-  url.searchParams.set('$limit', '5000');
-  url.searchParams.set('$where', "site_state_abbreviation = 'SC'");
+  // South Carolina FIPS = 45
+  url.searchParams.set('StateFipsCode', '45');
+  url.searchParams.set('Token', token);
 
   const response = await fetch(url.toString(), {
-    headers: {
-      'X-App-Token': apiKey,
-      Accept: 'application/json',
-    },
+    headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(30000),
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HRSA API returned ${response.status}: ${text}`);
+    throw new Error(
+      `HRSA API returned ${response.status}: ${response.statusText}`
+    );
   }
 
   const json = await response.json();
-  const records: unknown[] = Array.isArray(json) ? json : [];
+
+  const records = json?.HCC ?? [];
 
   const clinics: NormalizedClinic[] = [];
 
-  for (const raw of records) {
-    const parsed = hrsaRecordSchema.safeParse(raw);
-    if (!parsed.success) continue;
-
-    const r: HrsaRecord = parsed.data;
-
-    // Skip non-operational sites
-    if (r.operationalstatus && r.operationalstatus !== 'Active') continue;
-
-    const lon = r.geocoding_artifact_address_primary_x_coordinate ?? null;
-    const lat = r.geocoding_artifact_address_primary_y_coordinate ?? null;
+  for (const r of records) {
+    const [latStr, lonStr] = (r.LAT_LON || '').split(' ');
+    const lat = latStr ? Number(latStr) : null;
+    const lon = lonStr ? Number(lonStr) : null;
 
     clinics.push({
       source: 'HRSA',
-      source_id: r.healthcenterid,
-      name: r.healthcentername,
-      slug: slugify(r.healthcentername),
+      source_id: String(r.Row_ID),
+      name: r.SITE_NM,
+      slug: slugify(r.SITE_NM),
       description: null,
-      phone: normalizePhone(r.site_telephone_number),
+      phone: normalizePhone(r.SITE_PHONE_NUM),
       email: null,
-      website: normalizeUrl(r.healthcenterurl),
-      address_line1: r.site_address?.trim() || null,
+      website: normalizeUrl(r.SITE_URL),
+      address_line1: r.SITE_ADDRESS ?? null,
       address_line2: null,
-      city: r.site_city?.trim() || null,
-      state: r.site_state_abbreviation?.trim() || 'SC',
-      zip: normalizeZip(r.site_postal_code),
-      county: r.healthcentercounty?.trim() || null,
+      city: r.SITE_CITY ?? null,
+      state: r.SITE_STATE_ABBR ?? 'SC',
+      zip: normalizeZip(r.SITE_ZIP_CD),
+      county: null,
       latitude: lat,
       longitude: lon,
-      services: toArray(r.healthcenterservicedeliverymethods, ';'),
+      services: [],
       languages: ['English'],
       hours_json: null,
       eligibility: 'All residents regardless of ability to pay.',
