@@ -26,7 +26,11 @@ export async function fetchHrsaClinics(): Promise<NormalizedClinic[]> {
   url.searchParams.set('Token', token);
 
   const response = await fetch(url.toString(), {
-    headers: { Accept: 'application/json' },
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
     signal: AbortSignal.timeout(30000),
   });
 
