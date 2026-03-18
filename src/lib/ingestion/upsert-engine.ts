@@ -80,102 +80,107 @@ export async function runIngestion(
   };
 
   // 2. Process each clinic
-  for (const clinic of clinics) {
-    try {
-      // Check for existing row
-      const { data: existing } = await supabase
-        .from('clinics')
-        .select('*')
-        .eq('source', clinic.source)
-        .eq('source_id', clinic.source_id)
-        .maybeSingle();
+  // 2. Process each clinic (with controlled concurrency)
+  const CONCURRENCY_LIMIT = 10;
 
-      if (!existing) {
-        // ── INSERT ──
-        const locationSql =
-          clinic.longitude != null && clinic.latitude != null
-            ? `SRID=4326;POINT(${clinic.longitude} ${clinic.latitude})`
-            : null;
+  for (let i = 0; i < clinics.length; i += CONCURRENCY_LIMIT) {
+    const chunk = clinics.slice(i, i + CONCURRENCY_LIMIT);
 
-        const { data: inserted, error: insertError } = await supabase
-          .from('clinics')
-          .insert({
-            ...clinic,
-            location: locationSql,
-          })
-          .select('id')
-          .single();
+    await Promise.all(
+      chunk.map(async (clinic) => {
+        try {
+          // Check for existing row
+          const { data: existing } = await supabase
+            .from('clinics')
+            .select('*')
+            .eq('source', clinic.source)
+            .eq('source_id', clinic.source_id)
+            .maybeSingle();
 
-        if (insertError) {
-          result.errors.push(
-            `INSERT ${clinic.source_id}: ${insertError.message}`
-          );
-          result.skipped++;
-          continue;
-        }
+          if (!existing) {
+            // ── INSERT ──
+            const locationSql =
+              clinic.longitude != null && clinic.latitude != null
+                ? `SRID=4326;POINT(${clinic.longitude} ${clinic.latitude})`
+                : null;
 
-        // Log the creation
-        await supabase.from('clinic_changes').insert({
-          ingestion_run_id: run.id,
-          clinic_id: inserted.id,
-          change_type: 'created',
-          field_changes: null,
-        });
+            const { data: inserted, error: insertError } = await supabase
+              .from('clinics')
+              .insert({
+                ...clinic,
+                location: locationSql,
+              })
+              .select('id')
+              .single();
 
-        result.created++;
-      } else {
-        // ── UPDATE (only if fields changed) ──
-        const diffs = computeDiffs(existing, clinic);
+            if (insertError) {
+              result.errors.push(
+                `INSERT ${clinic.source_id}: ${insertError.message}`
+              );
+              result.skipped++;
+              return;
+            }
 
-        if (Object.keys(diffs).length === 0) {
-          result.skipped++;
-          continue;
-        }
+            await supabase.from('clinic_changes').insert({
+              ingestion_run_id: run.id,
+              clinic_id: inserted.id,
+              change_type: 'created',
+              field_changes: null,
+            });
 
-        // Build the update payload from changed fields only
-        const updatePayload: Record<string, unknown> = {};
-        for (const key of Object.keys(diffs)) {
-          updatePayload[key as keyof typeof clinic] =
-            clinic[key as keyof typeof clinic];
-        }
+            result.created++;
+          } else {
+            // ── UPDATE (only if fields changed) ──
+            const diffs = computeDiffs(existing, clinic);
 
-        // If lat/lon changed, update location too
-        if (diffs.latitude || diffs.longitude) {
-          const lat = clinic.latitude ?? existing.latitude;
-          const lon = clinic.longitude ?? existing.longitude;
-          if (lat != null && lon != null) {
-            updatePayload.location = `SRID=4326;POINT(${lon} ${lat})`;
+            if (Object.keys(diffs).length === 0) {
+              result.skipped++;
+              return;
+            }
+
+            const updatePayload: Record<string, unknown> = {};
+            for (const key of Object.keys(diffs)) {
+              updatePayload[key as keyof typeof clinic] =
+                clinic[key as keyof typeof clinic];
+            }
+
+            if (diffs.latitude || diffs.longitude) {
+              const lat = clinic.latitude ?? existing.latitude;
+              const lon = clinic.longitude ?? existing.longitude;
+              if (lat != null && lon != null) {
+                updatePayload.location = `SRID=4326;POINT(${lon} ${lat})`;
+              }
+            }
+
+            const { error: updateError } = await supabase
+              .from('clinics')
+              .update(updatePayload)
+              .eq('id', existing.id);
+
+            if (updateError) {
+              result.errors.push(
+                `UPDATE ${clinic.source_id}: ${updateError.message}`
+              );
+              result.skipped++;
+              return;
+            }
+
+            await supabase.from('clinic_changes').insert({
+              ingestion_run_id: run.id,
+              clinic_id: existing.id,
+              change_type: 'updated',
+              field_changes: diffs,
+            });
+
+            result.updated++;
           }
-        }
-
-        const { error: updateError } = await supabase
-          .from('clinics')
-          .update(updatePayload)
-          .eq('id', existing.id);
-
-        if (updateError) {
-          result.errors.push(
-            `UPDATE ${clinic.source_id}: ${updateError.message}`
-          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown error';
+          result.errors.push(`${clinic.source_id}: ${msg}`);
           result.skipped++;
-          continue;
         }
-
-        // Log field-level changes
-        await supabase.from('clinic_changes').insert({
-          ingestion_run_id: run.id,
-          clinic_id: existing.id,
-          change_type: 'updated',
-          field_changes: diffs,
-        });
-
-        result.updated++;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error';
-      result.errors.push(`${clinic.source_id}: ${msg}`);
-      result.skipped++;
-    }
+      })
+    );
   }
 
   // 3. Finalize the ingestion run
