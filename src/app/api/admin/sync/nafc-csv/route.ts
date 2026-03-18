@@ -4,12 +4,15 @@ import { parseNafcCsv } from '@/lib/ingestion/nafc-csv';
 import { runIngestion } from '@/lib/ingestion/upsert-engine';
 import { adminRateLimiter } from '@/lib/rate-limit';
 
+export const dynamic = 'force-dynamic';
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 export async function POST(request: NextRequest) {
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     '127.0.0.1';
+
   const rl = adminRateLimiter.check(ip);
   if (!rl.allowed) {
     return NextResponse.json(
@@ -27,7 +30,6 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file');
 
-    // Validate file presence
     if (!file || !(file instanceof File)) {
       return NextResponse.json(
         { error: 'No CSV file provided. Use the "file" form field.' },
@@ -35,8 +37,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file type
     const allowedTypes = ['text/csv', 'application/vnd.ms-excel', 'text/plain'];
+
     if (!allowedTypes.includes(file.type) && !file.name.endsWith('.csv')) {
       return NextResponse.json(
         { error: 'Invalid file type. Only .csv files are accepted.' },
@@ -44,15 +46,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file size
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: `File too large. Maximum size is 10 MB.` },
+        { error: 'File too large. Maximum size is 10 MB.' },
         { status: 400 }
       );
     }
 
-    // Read file content
+    console.log('[NAFC] Reading CSV file...');
+
     const csvText = await file.text();
 
     if (!csvText.trim()) {
@@ -62,26 +64,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse CSV
+    console.log('[NAFC] Parsing CSV...');
+
     const {
       clinics,
       errors: parseErrors,
       totalRows,
     } = await parseNafcCsv(csvText);
 
-    if (clinics.length === 0) {
+    if (!clinics.length) {
       return NextResponse.json(
         {
           error: 'No valid clinic rows found in CSV.',
-          parse_errors: parseErrors.slice(0, 20),
           total_rows: totalRows,
+          parse_errors: parseErrors.slice(0, 20),
         },
         { status: 400 }
       );
     }
 
-    // Run ingestion
-    const result = await runIngestion('NAFC', clinics, auth.userId!);
+    console.log(
+      `[NAFC] Parsed ${clinics.length} valid rows out of ${totalRows}.`
+    );
+
+    const result = await runIngestion(
+      'NAFC', // keep consistent everywhere
+      clinics,
+      auth.userId!
+    );
+
+    console.log(
+      `[NAFC] Ingestion complete. Created: ${result.created}, Updated: ${result.updated}`
+    );
 
     return NextResponse.json({
       success: true,
@@ -95,7 +109,8 @@ export async function POST(request: NextRequest) {
       ingestion_errors: result.errors.slice(0, 10),
     });
   } catch (err) {
-    console.error('NAFC CSV ingestion error:', err);
+    console.error('[NAFC] CSV ingestion error:', err);
+
     return NextResponse.json(
       {
         error: 'CSV ingestion failed',
