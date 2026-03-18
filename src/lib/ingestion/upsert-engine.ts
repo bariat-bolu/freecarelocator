@@ -39,14 +39,20 @@ export interface IngestionResult {
 }
 
 /**
- * Upsert an array of normalized clinics and log everything.
- *
- * For each clinic:
- * 1. Check if a row with (source, source_id) already exists.
- * 2. If not → INSERT + log 'created' in clinic_changes.
- * 3. If yes → compare fields, UPDATE only if changed + log diffs.
- * 4. If error → skip and record the error.
+ * Generate normalized identity key for cross-source dedupe.
  */
+function identityKey(c: any) {
+  return (
+    (c.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') +
+    '|' +
+    (c.address_line1 || '').toLowerCase().replace(/[^a-z0-9]/g, '') +
+    '|' +
+    (c.city || '').toLowerCase() +
+    '|' +
+    (c.state || '').toLowerCase()
+  );
+}
+
 export async function runIngestion(
   source: string,
   clinics: NormalizedClinic[],
@@ -54,7 +60,6 @@ export async function runIngestion(
 ): Promise<IngestionResult> {
   const supabase = await createClient();
 
-  // 1. Create ingestion_runs row
   const { data: run, error: runError } = await supabase
     .from('ingestion_runs')
     .insert({
@@ -79,8 +84,6 @@ export async function runIngestion(
     errors: [],
   };
 
-  // 2. Process each clinic
-  // 2. Process each clinic (with controlled concurrency)
   const CONCURRENCY_LIMIT = 10;
 
   for (let i = 0; i < clinics.length; i += CONCURRENCY_LIMIT) {
@@ -89,7 +92,7 @@ export async function runIngestion(
     await Promise.all(
       chunk.map(async (clinic) => {
         try {
-          // Check for existing row
+          // 🔹 First: per-source lookup
           const { data: existing } = await supabase
             .from('clinics')
             .select('*')
@@ -98,7 +101,53 @@ export async function runIngestion(
             .maybeSingle();
 
           if (!existing) {
-            // ── INSERT ──
+            // 🔥 Cross-source identity check BEFORE insert
+            const key = identityKey(clinic);
+
+            const { data: potentialMatches } = await supabase
+              .from('clinics')
+              .select('*')
+              .eq('city', clinic.city)
+              .eq('state', clinic.state);
+
+            if (potentialMatches && potentialMatches.length > 0) {
+              for (const match of potentialMatches) {
+                if (identityKey(match) === key) {
+                  const mergedSources = Array.from(
+                    new Set([...(match.sources || []), clinic.source])
+                  );
+
+                  const mergedServices = Array.from(
+                    new Set([
+                      ...(match.services || []),
+                      ...(clinic.services || []),
+                    ])
+                  );
+
+                  await supabase
+                    .from('clinics')
+                    .update({
+                      sources: mergedSources,
+                      services: mergedServices,
+                      phone: match.phone || clinic.phone,
+                      website: match.website || clinic.website,
+                    })
+                    .eq('id', match.id);
+
+                  await supabase.from('clinic_changes').insert({
+                    ingestion_run_id: run.id,
+                    clinic_id: match.id,
+                    change_type: 'merged',
+                    field_changes: { merged_source: clinic.source },
+                  });
+
+                  result.updated++;
+                  return;
+                }
+              }
+            }
+
+            // ── INSERT (no identity match found) ──
             const locationSql =
               clinic.longitude != null && clinic.latitude != null
                 ? `SRID=4326;POINT(${clinic.longitude} ${clinic.latitude})`
@@ -109,6 +158,7 @@ export async function runIngestion(
               .insert({
                 ...clinic,
                 location: locationSql,
+                sources: [clinic.source],
               })
               .select('id')
               .single();
@@ -130,7 +180,7 @@ export async function runIngestion(
 
             result.created++;
           } else {
-            // ── UPDATE (only if fields changed) ──
+            // ── STANDARD UPDATE (same source) ──
             const diffs = computeDiffs(existing, clinic);
 
             if (Object.keys(diffs).length === 0) {
@@ -142,14 +192,6 @@ export async function runIngestion(
             for (const key of Object.keys(diffs)) {
               updatePayload[key as keyof typeof clinic] =
                 clinic[key as keyof typeof clinic];
-            }
-
-            if (diffs.latitude || diffs.longitude) {
-              const lat = clinic.latitude ?? existing.latitude;
-              const lon = clinic.longitude ?? existing.longitude;
-              if (lat != null && lon != null) {
-                updatePayload.location = `SRID=4326;POINT(${lon} ${lat})`;
-              }
             }
 
             const { error: updateError } = await supabase
@@ -183,18 +225,15 @@ export async function runIngestion(
     );
   }
 
-  // 3. Finalize the ingestion run
   await supabase
     .from('ingestion_runs')
     .update({
-      status: result.errors.length > 0 ? 'completed' : 'completed',
+      status: 'completed',
       records_created: result.created,
       records_updated: result.updated,
       records_skipped: result.skipped,
       error_message:
-        result.errors.length > 0
-          ? result.errors.slice(0, 20).join('\\n')
-          : null,
+        result.errors.length > 0 ? result.errors.slice(0, 20).join('\n') : null,
       completed_at: new Date().toISOString(),
     })
     .eq('id', run.id);
@@ -202,10 +241,6 @@ export async function runIngestion(
   return result;
 }
 
-/**
- * Compare an existing DB row against incoming data.
- * Returns an object of { field: { old, new } } for changed fields.
- */
 function computeDiffs(
   existing: Record<string, unknown>,
   incoming: NormalizedClinic
@@ -241,7 +276,6 @@ function computeDiffs(
     const oldVal = existing[field];
     const newVal = incoming[field];
 
-    // Skip if incoming is null/undefined (don't overwrite with nothing)
     if (newVal == null || newVal === '') continue;
 
     const oldStr = JSON.stringify(oldVal ?? null);
