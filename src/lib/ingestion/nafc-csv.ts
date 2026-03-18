@@ -10,7 +10,7 @@ import {
   computeHash,
 } from './normalize';
 
-// Zod schema for each CSV row (all optional — CSV data is messy)
+// Zod schema for normalized row
 const nafcRowSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   address: z.string().optional().default(''),
@@ -36,13 +36,52 @@ export interface CsvParseResult {
 }
 
 /**
+ * Flexible header mapper — handles messy NAFC CSV formats
+ */
+function normalizeCsvRow(raw: Record<string, any>) {
+  return {
+    name:
+      raw.name ||
+      raw.clinic_name ||
+      raw.organization_name ||
+      raw.site_name ||
+      raw.clinic ||
+      raw.practice_name ||
+      '',
+
+    address:
+      raw.address || raw.street || raw.address_line_1 || raw.address1 || '',
+
+    city: raw.city || '',
+    state: raw.state || 'SC',
+    zip: raw.zip || raw.postal_code || raw.zip_code || '',
+
+    phone:
+      raw.phone ||
+      raw.phone_number ||
+      raw.main_phone ||
+      raw.contact_phone ||
+      '',
+
+    website: raw.website || raw.url || raw.web_site || '',
+    hours: raw.hours || raw.operating_hours || '',
+    services: raw.services || raw.service_types || '',
+    eligibility: raw.eligibility || '',
+    languages: raw.languages || raw.language || '',
+
+    latitude: raw.latitude,
+    longitude: raw.longitude,
+  };
+}
+
+/**
  * Parse a NAFC CSV string into normalized clinic records.
  */
 export async function parseNafcCsv(csvText: string): Promise<CsvParseResult> {
   const parseResult = Papa.parse<Record<string, string>>(csvText, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: (h) => h.trim().toLowerCase().replace(/\\s+/g, '_'),
+    transformHeader: (h) => h.trim().toLowerCase().replace(/\s+/g, '_'),
   });
 
   const errors: string[] = [];
@@ -55,9 +94,13 @@ export async function parseNafcCsv(csvText: string): Promise<CsvParseResult> {
 
   for (let i = 0; i < parseResult.data.length; i++) {
     const raw = parseResult.data[i];
-    const rowNum = i + 2; // +2 for 1-indexed + header row
+    const rowNum = i + 2;
 
-    const parsed = nafcRowSchema.safeParse(raw);
+    // 🔥 Normalize messy headers before validation
+    const normalizedRow = normalizeCsvRow(raw);
+
+    const parsed = nafcRowSchema.safeParse(normalizedRow);
+
     if (!parsed.success) {
       const fieldErrors = parsed.error.issues
         .map((e) => `${e.path.join('.')}: ${e.message}`)
@@ -68,10 +111,10 @@ export async function parseNafcCsv(csvText: string): Promise<CsvParseResult> {
 
     const r = parsed.data;
 
-    // Compute source_id from hash if no explicit ID in CSV
     const sourceId = await computeHash(r.name, r.address, r.zip);
 
     const lat = r.latitude != null && isFinite(r.latitude) ? r.latitude : null;
+
     const lon =
       r.longitude != null && isFinite(r.longitude) ? r.longitude : null;
 
@@ -104,5 +147,9 @@ export async function parseNafcCsv(csvText: string): Promise<CsvParseResult> {
     });
   }
 
-  return { clinics, errors, totalRows: parseResult.data.length };
+  return {
+    clinics,
+    errors,
+    totalRows: parseResult.data.length,
+  };
 }
