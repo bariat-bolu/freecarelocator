@@ -4,10 +4,13 @@ import { fetchScdphClinics } from '@/lib/ingestion/scdph';
 import { runIngestion } from '@/lib/ingestion/upsert-engine';
 import { adminRateLimiter } from '@/lib/rate-limit';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     '127.0.0.1';
+
   const rl = adminRateLimiter.check(ip);
   if (!rl.allowed) {
     return NextResponse.json(
@@ -22,16 +25,29 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    console.log('[SCDPH] Fetching clinics...');
+
     const clinics = await fetchScdphClinics();
 
-    if (clinics.length === 0) {
+    if (!clinics.length) {
+      console.warn('[SCDPH] No clinics returned.');
       return NextResponse.json(
         { error: 'No clinics returned from SC DPH.' },
         { status: 502 }
       );
     }
 
-    const result = await runIngestion('SC_DPH', clinics, auth.userId!);
+    console.log(`[SCDPH] ${clinics.length} clinics fetched.`);
+
+    const result = await runIngestion(
+      'SCDPH', // keep consistent with ingestion file
+      clinics,
+      auth.userId!
+    );
+
+    console.log(
+      `[SCDPH] Ingestion complete. Created: ${result.created}, Updated: ${result.updated}`
+    );
 
     return NextResponse.json({
       success: true,
@@ -43,7 +59,8 @@ export async function POST(request: NextRequest) {
       errors: result.errors.slice(0, 10),
     });
   } catch (err) {
-    console.error('SC DPH sync error:', err);
+    console.error('[SCDPH] Sync error:', err);
+
     return NextResponse.json(
       {
         error: 'SC DPH sync failed',

@@ -4,24 +4,37 @@ import {
   normalizePhone,
   normalizeUrl,
   normalizeZip,
-  toArray,
   slugify,
 } from './normalize';
 
-// SC DPH ArcGIS Feature attributes (subset)
+/**
+ * SC DPH ArcGIS Feature attributes
+ * Matches real dataset field names exactly
+ */
 const scdphAttributeSchema = z.object({
   OBJECTID: z.coerce.string(),
-  NAME: z.string().optional().nullable(),
-  ADDRESS: z.string().optional().nullable(),
-  CITY: z.string().optional().nullable(),
-  STATE: z.string().optional().nullable(),
-  ZIP: z.string().optional().nullable(),
-  COUNTY: z.string().optional().nullable(),
-  PHONE: z.string().optional().nullable(),
-  WEBSITE: z.string().optional().nullable(),
-  SERVICES: z.string().optional().nullable(),
-  HOURS: z.string().optional().nullable(),
-  TYPE: z.string().optional().nullable(),
+  Name: z.string().optional().nullable(),
+  Address: z.string().optional().nullable(),
+  City: z.string().optional().nullable(),
+  State: z.string().optional().nullable(),
+  Zip: z.union([z.string(), z.number()]).optional().nullable(),
+  County: z.string().optional().nullable(),
+  Phone_Numb: z.string().optional().nullable(),
+  URL: z.string().optional().nullable(),
+
+  Child_Heal: z.string().optional().nullable(),
+  CSHCN: z.string().optional().nullable(),
+  Family_Pla: z.string().optional().nullable(),
+  WIC: z.string().optional().nullable(),
+  Immunizati: z.string().optional().nullable(),
+  TB: z.string().optional().nullable(),
+  STD_HIV: z.string().optional().nullable(),
+  FSS: z.string().optional().nullable(),
+  EPI: z.string().optional().nullable(),
+  VR: z.string().optional().nullable(),
+
+  Region: z.string().optional().nullable(),
+  Appt_Numb: z.string().optional().nullable(),
 });
 
 const scdphFeatureSchema = z.object({
@@ -36,19 +49,46 @@ const scdphFeatureSchema = z.object({
 });
 
 /**
- * Fetch SC DPH clinic data from the public ArcGIS REST endpoint.
+ * Convert service flags (Yes) into structured array
+ */
+function extractServices(a: z.infer<typeof scdphAttributeSchema>): string[] {
+  const services: string[] = [];
+
+  const map: Record<string, string> = {
+    Child_Heal: 'Child Health',
+    CSHCN: 'Children with Special Health Care Needs',
+    Family_Pla: 'Family Planning',
+    WIC: 'WIC',
+    Immunizati: 'Immunizations',
+    TB: 'Tuberculosis',
+    STD_HIV: 'STD/HIV',
+    FSS: 'Family Support Services',
+    EPI: 'Epidemiology',
+    VR: 'Vital Records',
+  };
+
+  for (const key of Object.keys(map)) {
+    if ((a as any)[key] === 'Yes') {
+      services.push(map[key]);
+    }
+  }
+
+  return services;
+}
+
+/**
+ * Fetch SC DPH clinic data from ArcGIS REST endpoint
  */
 export async function fetchScdphClinics(): Promise<NormalizedClinic[]> {
-  // SC DHEC / DPH ArcGIS endpoint — public, no auth needed
-  // This URL may need adjustment based on the actual DHEC service layer.
   const url = new URL(
-    'https://services2.arcgis.com/XZg2efAbaieYAXmu/arcgis/rest/services/SC_Free_Clinics/FeatureServer/0/query'
+    'https://gis.dhec.sc.gov/arcgis/rest/services/health/HealthDepartments/MapServer/0/query'
   );
+
   url.searchParams.set('where', '1=1');
   url.searchParams.set('outFields', '*');
   url.searchParams.set('f', 'json');
   url.searchParams.set('resultRecordCount', '5000');
-  url.searchParams.set('outSR', '4326');
+  url.searchParams.set('outSR', '4326'); // convert to lat/lon automatically
 
   const response = await fetch(url.toString(), {
     signal: AbortSignal.timeout(30000),
@@ -76,34 +116,35 @@ export async function fetchScdphClinics(): Promise<NormalizedClinic[]> {
     if (!parsed.success) continue;
 
     const { attributes: a, geometry: g } = parsed.data;
-    if (!a.NAME) continue;
+
+    if (!a.Name) continue;
 
     clinics.push({
-      source: 'SC_DPH',
+      source: 'SCDPH',
       source_id: a.OBJECTID,
-      name: a.NAME,
-      slug: slugify(a.NAME),
-      description: a.TYPE || null,
-      phone: normalizePhone(a.PHONE),
+      name: a.Name,
+      slug: slugify(a.Name),
+      description: a.Region || null,
+      phone: normalizePhone(a.Phone_Numb),
       email: null,
-      website: normalizeUrl(a.WEBSITE),
-      address_line1: a.ADDRESS?.trim() || null,
+      website: normalizeUrl(a.URL),
+      address_line1: a.Address?.trim() || null,
       address_line2: null,
-      city: a.CITY?.trim() || null,
-      state: a.STATE?.trim() || 'SC',
-      zip: normalizeZip(a.ZIP),
-      county: a.COUNTY?.trim() || null,
+      city: a.City?.trim() || null,
+      state: a.State?.trim() || 'SC',
+      zip: normalizeZip(String(a.Zip ?? '')),
+      county: a.County?.trim() || null,
       latitude: g?.y ?? null,
       longitude: g?.x ?? null,
-      services: toArray(a.SERVICES, ','),
+      services: extractServices(a),
       languages: ['English'],
-      hours_json: a.HOURS ? { info: a.HOURS } : null,
-      eligibility: null,
+      hours_json: null,
+      eligibility: 'Public health services provided by South Carolina DPH.',
       accepts_uninsured: true,
       sliding_scale: false,
       cost: null,
       docs_needed: null,
-      is_approved: true, // DPH data is trusted
+      is_approved: true,
     });
   }
 
