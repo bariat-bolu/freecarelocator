@@ -40,6 +40,7 @@ export async function fetchHrsaClinicsByState(
 
   const json = await response.json();
   const records = json?.HCC ?? [];
+  console.log('HRSA first record:', records[0]);
 
   const clinics: NormalizedClinic[] = [];
 
