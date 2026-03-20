@@ -1,17 +1,29 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AuthHeader from '@/components/AuthHeader';
 import SearchBar from '@/components/SearchBar';
 import ClinicFilters from '@/components/ClinicFilters';
 import SearchResults from '@/components/SearchResults';
 import type { Clinic, SearchResponse } from '@/types/clinic';
 
-export default function HomePage() {
-  const [query, setQuery] = useState('');
-  const [radius, setRadius] = useState(10);
-  const [services, setServices] = useState<string[]>([]);
-  const [languages, setLanguages] = useState<string[]>([]);
+function HomePageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Initialize state from URL params (preserves state on back navigation)
+  const [query, setQuery] = useState(searchParams.get('q') || '');
+  const [radius, setRadius] = useState(
+    Number(searchParams.get('radius')) || 10
+  );
+  const [services, setServices] = useState<string[]>(
+    searchParams.get('services')?.split(',').filter(Boolean) || []
+  );
+  const [languages, setLanguages] = useState<string[]>(
+    searchParams.get('languages')?.split(',').filter(Boolean) || []
+  );
+
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +33,26 @@ export default function HomePage() {
     SearchResponse['pagination'] | null
   >(null);
 
+  // Track whether this is the initial mount (to auto-search from URL)
+  const didAutoSearch = useRef(false);
+
+  /**
+   * Sync current search state to URL without full navigation.
+   */
+  function updateUrl(q: string, r: number, svc: string[], lang: string[]) {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (r !== 10) params.set('radius', String(r));
+    if (svc.length > 0) params.set('services', svc.join(','));
+    if (lang.length > 0) params.set('languages', lang.join(','));
+
+    const paramString = params.toString();
+    const newUrl = paramString ? `/?${paramString}` : '/';
+
+    // Replace (not push) to avoid polluting history on every search
+    router.replace(newUrl, { scroll: false });
+  }
+
   const handleSearch = useCallback(
     async (offset = 0) => {
       const trimmed = query.trim();
@@ -29,6 +61,9 @@ export default function HomePage() {
       setLoading(true);
       setError(null);
       setHasSearched(true);
+
+      // Sync to URL
+      updateUrl(trimmed, radius, services, languages);
 
       try {
         const params = new URLSearchParams({
@@ -49,7 +84,7 @@ export default function HomePage() {
 
         if (res.status === 429) {
           setError(
-            'You\\u2019re searching too quickly. Please wait a moment and try again.'
+            'You\u2019re searching too quickly. Please wait a moment and try again.'
           );
           setClinics([]);
           setPagination(null);
@@ -69,7 +104,6 @@ export default function HomePage() {
         if (offset === 0) {
           setClinics(data.results);
         } else {
-          // Append for "Load more"
           setClinics((prev) => [...prev, ...data.results]);
         }
 
@@ -82,8 +116,19 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [query, radius, services, languages]
+    [query, radius, services, languages, router]
   );
+
+  // Auto-search on mount if URL has a query (back navigation case)
+  useEffect(() => {
+    if (didAutoSearch.current) return;
+    didAutoSearch.current = true;
+
+    const urlQuery = searchParams.get('q');
+    if (urlQuery && urlQuery.trim()) {
+      handleSearch(0);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleLoadMore() {
     if (pagination) {
@@ -111,7 +156,7 @@ export default function HomePage() {
               <span className="text-sage-primary">.</span>
             </h1>
             <p className="text-sage-text/60 mx-auto mt-3 max-w-lg">
-              Search free and reduced-cost clinics near you.
+              Search free and reduced-cost clinics across South Carolina.
             </p>
           </div>
 
@@ -199,5 +244,19 @@ export default function HomePage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="bg-sage-bg flex min-h-screen items-center justify-center">
+          <p className="text-sage-text/40 text-sm">Loading…</p>
+        </div>
+      }
+    >
+      <HomePageInner />
+    </Suspense>
   );
 }

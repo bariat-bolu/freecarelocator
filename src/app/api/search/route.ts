@@ -167,7 +167,10 @@ export async function GET(request: NextRequest) {
       results = results.slice(0, limit); // Trim the extra row
     }
 
-    // 5. Build response
+    // 5. Deduplicate cross-source matches
+    results = deduplicateResults(results);
+
+    // 6. Build response
     const response: SearchResponse = {
       results,
       pagination: {
@@ -194,4 +197,52 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Deduplicate clinics that appear in multiple sources.
+ * Groups by normalized name + zip and keeps the row with the most data.
+ */
+function deduplicateResults(clinics: Clinic[]): Clinic[] {
+  const seen = new Map<string, Clinic>();
+
+  for (const clinic of clinics) {
+    const key =
+      (clinic.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') +
+      '|' +
+      (clinic.zip || '');
+
+    const existing = seen.get(key);
+
+    if (!existing) {
+      seen.set(key, clinic);
+      continue;
+    }
+
+    // Keep the record with more complete data
+    const existingScore = completenessScore(existing);
+    const newScore = completenessScore(clinic);
+
+    if (newScore > existingScore) {
+      seen.set(key, clinic);
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+function completenessScore(c: Clinic): number {
+  let score = 0;
+  if (c.phone) score++;
+  if (c.website) score++;
+  if (c.email) score++;
+  if (c.hours_json) score++;
+  if (c.eligibility) score++;
+  if (c.cost) score++;
+  if (c.docs_needed) score++;
+  if (c.description) score++;
+  if (c.services && c.services.length > 0) score += c.services.length;
+  if (c.languages && c.languages.length > 1) score++;
+  if (c.latitude != null) score++;
+  return score;
 }
