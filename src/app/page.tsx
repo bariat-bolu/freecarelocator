@@ -170,7 +170,7 @@ function HomePageInner() {
               <span className="text-sage-primary">.</span>
             </h1>
             <p className="text-sage-text/60 mx-auto mt-3 max-w-lg">
-              Search free and reduced-cost clinics across South Carolina.
+              Search free and reduced-cost clinics near you.
             </p>
           </div>
 
