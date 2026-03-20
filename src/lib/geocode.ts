@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 interface GeoResult {
   lat: number;
@@ -17,8 +17,8 @@ interface GeoResult {
  * clinic data as the coordinate source.
  */
 export async function geocode(input: string): Promise<GeoResult | null> {
-  const supabase = await createClient();
-  const isZip = /^\\d{5}$/.test(input);
+  const supabase = createAdminClient();
+  const isZip = /^\d{5}$/.test(input);
 
   let query = supabase
     .from('clinics')
@@ -37,7 +37,6 @@ export async function geocode(input: string): Promise<GeoResult | null> {
 
   if (!data || data.length === 0) return null;
 
-  // Compute centroid of matching clinics
   const sum = data.reduce(
     (acc, row) => ({
       lat: acc.lat + (row.latitude as number),

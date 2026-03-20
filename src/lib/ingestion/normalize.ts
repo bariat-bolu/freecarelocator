@@ -44,13 +44,27 @@ export function toArray(
 /**
  * Normalize ZIP to 5 digits.
  */
+/**
+ * Normalize ZIP to 5 digits.
+ * Handles all US formats:
+ *   "29201"       → "29201"  (SC)
+ *   "02920"       → "02920"  (RI)
+ *   "29201-0000"  → "29201"  (ZIP+4)
+ *   "292010000"   → "29201"  (ZIP+4 no dash)
+ *   29201         → "29201"  (numeric input)
+ *   2920          → "02920"  (numeric, leading zero stripped by API)
+ */
 export function normalizeZip(
   raw: string | number | null | undefined
 ): string | null {
   if (raw == null) return null;
-  const str = String(raw).trim();
-  const match = str.match(/^(\\d{5})/);
-  return match ? match[1] : null;
+  const str = String(raw)
+    .trim()
+    .replace(/[^0-9]/g, '');
+  if (str.length === 0) return null;
+  if (str.length >= 5) return str.slice(0, 5);
+  if (str.length >= 3) return str.padStart(5, '0');
+  return null;
 }
 
 /**
