@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
+import { useState, useCallback, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AuthHeader from '@/components/AuthHeader';
 import SearchBar from '@/components/SearchBar';
@@ -32,9 +32,6 @@ function HomePageInner() {
   const [pagination, setPagination] = useState<
     SearchResponse['pagination'] | null
   >(null);
-
-  // Track whether this is the initial mount (to auto-search from URL)
-  const didAutoSearch = useRef(false);
 
   /**
    * Sync current search state to URL without full navigation.
@@ -121,14 +118,11 @@ function HomePageInner() {
 
   // Auto-search on mount if URL has a query (back navigation case)
   useEffect(() => {
-    if (didAutoSearch.current) return;
-    didAutoSearch.current = true;
-
     const urlQuery = searchParams.get('q');
-    if (urlQuery && urlQuery.trim()) {
+    if (urlQuery && urlQuery.trim() && !hasSearched) {
       handleSearch(0);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleLoadMore() {
     if (pagination) {
