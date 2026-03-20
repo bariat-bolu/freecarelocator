@@ -12,17 +12,17 @@ function HomePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Initialize state from URL params (preserves state on back navigation)
-  const [query, setQuery] = useState(searchParams.get('q') || '');
-  const [radius, setRadius] = useState(
-    Number(searchParams.get('radius')) || 10
-  );
-  const [services, setServices] = useState<string[]>(
-    searchParams.get('services')?.split(',').filter(Boolean) || []
-  );
-  const [languages, setLanguages] = useState<string[]>(
-    searchParams.get('languages')?.split(',').filter(Boolean) || []
-  );
+  const initialQuery = searchParams.get('q') || '';
+  const initialRadius = Number(searchParams.get('radius')) || 10;
+  const initialServices =
+    searchParams.get('services')?.split(',').filter(Boolean) || [];
+  const initialLanguages =
+    searchParams.get('languages')?.split(',').filter(Boolean) || [];
+
+  const [query, setQuery] = useState(initialQuery);
+  const [radius, setRadius] = useState(initialRadius);
+  const [services, setServices] = useState<string[]>(initialServices);
+  const [languages, setLanguages] = useState<string[]>(initialLanguages);
 
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,107 +33,104 @@ function HomePageInner() {
     SearchResponse['pagination'] | null
   >(null);
 
-  /**
-   * Sync current search state to URL without full navigation.
-   */
-  function updateUrl(q: string, r: number, svc: string[], lang: string[]) {
-    const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (r !== 10) params.set('radius', String(r));
-    if (svc.length > 0) params.set('services', svc.join(','));
-    if (lang.length > 0) params.set('languages', lang.join(','));
+  const updateUrl = useCallback(
+    (q: string, r: number, svc: string[], lang: string[]) => {
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (r !== 10) params.set('radius', String(r));
+      if (svc.length > 0) params.set('services', svc.join(','));
+      if (lang.length > 0) params.set('languages', lang.join(','));
 
-    const paramString = params.toString();
-    const newUrl = paramString ? `/?${paramString}` : '/';
-
-    // Replace (not push) to avoid polluting history on every search
-    router.replace(newUrl, { scroll: false });
-  }
-
-  const handleSearch = useCallback(
-    async (offset = 0) => {
-      // Read directly from URL params, not from state.
-      // On back navigation, state may not be settled yet when this runs.
-      const currentParams = new URLSearchParams(window.location.search);
-      const trimmed = (currentParams.get('q') || query).trim();
-      if (!trimmed) return;
-
-      setLoading(true);
-      setError(null);
-      setHasSearched(true);
-
-      // Sync query state to match what we're searching
-      setQuery(trimmed);
-
-      const currentRadius = Number(currentParams.get('radius')) || radius;
-      const currentServices =
-        currentParams.get('services')?.split(',').filter(Boolean) || services;
-      const currentLanguages =
-        currentParams.get('languages')?.split(',').filter(Boolean) || languages;
-
-      updateUrl(trimmed, currentRadius, currentServices, currentLanguages);
-
-      try {
-        const params = new URLSearchParams({
-          q: trimmed,
-          radius: String(currentRadius),
-          limit: '20',
-          offset: String(offset),
-        });
-
-        if (currentServices.length > 0) {
-          params.set('services', currentServices.join(','));
-        }
-        if (currentLanguages.length > 0) {
-          params.set('languages', currentLanguages.join(','));
-        }
-
-        const res = await fetch(`/api/search?${params.toString()}`);
-
-        if (res.status === 429) {
-          setError(
-            'You\u2019re searching too quickly. Please wait a moment and try again.'
-          );
-          setClinics([]);
-          setPagination(null);
-          return;
-        }
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          setError(body.error || `Search failed (${res.status})`);
-          setClinics([]);
-          setPagination(null);
-          return;
-        }
-
-        const data: SearchResponse = await res.json();
-
-        if (offset === 0) {
-          setClinics(data.results);
-        } else {
-          setClinics((prev) => [...prev, ...data.results]);
-        }
-
-        setPagination(data.pagination);
-      } catch {
-        setError('An unexpected error occurred. Please try again.');
-        setClinics([]);
-        setPagination(null);
-      } finally {
-        setLoading(false);
-      }
+      const paramString = params.toString();
+      const newUrl = paramString ? `/?${paramString}` : '/';
+      router.replace(newUrl, { scroll: false });
     },
-    [query, radius, services, languages, router]
+    [router]
   );
 
-  // Auto-search on mount if URL has a query (back navigation case)
-  useEffect(() => {
-    const urlQuery = searchParams.get('q');
-    if (urlQuery && urlQuery.trim() && !hasSearched) {
-      handleSearch(0);
+  /**
+   * Runs a search. When called with explicit params (from the mount effect),
+   * uses those. Otherwise reads from React state (for user-triggered searches).
+   */
+  async function runSearch(opts?: {
+    q: string;
+    r: number;
+    svc: string[];
+    lang: string[];
+    offset: number;
+  }) {
+    const q = opts?.q ?? query.trim();
+    const r = opts?.r ?? radius;
+    const svc = opts?.svc ?? services;
+    const lang = opts?.lang ?? languages;
+    const offset = opts?.offset ?? 0;
+
+    if (!q) return;
+
+    setLoading(true);
+    setError(null);
+    setHasSearched(true);
+
+    try {
+      const params = new URLSearchParams({
+        q,
+        radius: String(r),
+        limit: '20',
+        offset: String(offset),
+      });
+
+      if (svc.length > 0) params.set('services', svc.join(','));
+      if (lang.length > 0) params.set('languages', lang.join(','));
+
+      const res = await fetch(`/api/search?${params.toString()}`);
+
+      if (res.status === 429) {
+        setError(
+          'You\u2019re searching too quickly. Please wait a moment and try again.'
+        );
+        setClinics([]);
+        setPagination(null);
+        return;
+      }
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error || `Search failed (${res.status})`);
+        setClinics([]);
+        setPagination(null);
+        return;
+      }
+
+      const data: SearchResponse = await res.json();
+
+      if (offset === 0) {
+        setClinics(data.results);
+      } else {
+        setClinics((prev) => [...prev, ...data.results]);
+      }
+
+      setPagination(data.pagination);
+    } catch {
+      setError('An unexpected error occurred. Please try again.');
+      setClinics([]);
+      setPagination(null);
+    } finally {
+      setLoading(false);
     }
-  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
+
+  function handleSearch(offset = 0) {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    updateUrl(trimmed, radius, services, languages);
+    runSearch({
+      q: trimmed,
+      r: radius,
+      svc: services,
+      lang: languages,
+      offset,
+    });
+  }
 
   function handleLoadMore() {
     if (pagination) {
@@ -146,6 +143,19 @@ function HomePageInner() {
     setLanguages([]);
   }
 
+  // On mount: if URL has a query, re-run the search using URL values directly
+  useEffect(() => {
+    if (initialQuery.trim()) {
+      runSearch({
+        q: initialQuery.trim(),
+        r: initialRadius,
+        svc: initialServices,
+        lang: initialLanguages,
+        offset: 0,
+      });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const activeFilterCount = services.length + languages.length;
 
   return (
@@ -153,7 +163,6 @@ function HomePageInner() {
       <AuthHeader />
 
       <main className="flex-1">
-        {/* Hero + Search */}
         <section className="border-sage-muted/30 to-sage-bg border-b bg-gradient-to-b from-white px-6 pt-12 pb-8 sm:pt-16">
           <div className="mx-auto max-w-2xl text-center">
             <h1 className="font-display text-sage-text text-3xl font-bold tracking-tight sm:text-4xl">
@@ -176,7 +185,6 @@ function HomePageInner() {
             />
           </div>
 
-          {/* Filter toggle */}
           <div className="mx-auto mt-4 flex max-w-2xl justify-center">
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -213,7 +221,6 @@ function HomePageInner() {
           )}
         </section>
 
-        {/* Results */}
         <section className="px-6 py-8">
           <SearchResults
             clinics={clinics}
@@ -222,7 +229,6 @@ function HomePageInner() {
             hasSearched={hasSearched}
           />
 
-          {/* Load more */}
           {pagination?.has_more && !loading && (
             <div className="mx-auto mt-6 max-w-2xl text-center">
               <button
@@ -236,7 +242,6 @@ function HomePageInner() {
         </section>
       </main>
 
-      {/* Footer */}
       <footer className="border-sage-muted/40 border-t px-6 py-6">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 sm:flex-row">
           <p className="text-sage-text/40 text-xs">
