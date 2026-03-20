@@ -52,29 +52,40 @@ function HomePageInner() {
 
   const handleSearch = useCallback(
     async (offset = 0) => {
-      const trimmed = query.trim();
+      // Read directly from URL params, not from state.
+      // On back navigation, state may not be settled yet when this runs.
+      const currentParams = new URLSearchParams(window.location.search);
+      const trimmed = (currentParams.get('q') || query).trim();
       if (!trimmed) return;
 
       setLoading(true);
       setError(null);
       setHasSearched(true);
 
-      // Sync to URL
-      updateUrl(trimmed, radius, services, languages);
+      // Sync query state to match what we're searching
+      setQuery(trimmed);
+
+      const currentRadius = Number(currentParams.get('radius')) || radius;
+      const currentServices =
+        currentParams.get('services')?.split(',').filter(Boolean) || services;
+      const currentLanguages =
+        currentParams.get('languages')?.split(',').filter(Boolean) || languages;
+
+      updateUrl(trimmed, currentRadius, currentServices, currentLanguages);
 
       try {
         const params = new URLSearchParams({
           q: trimmed,
-          radius: String(radius),
+          radius: String(currentRadius),
           limit: '20',
           offset: String(offset),
         });
 
-        if (services.length > 0) {
-          params.set('services', services.join(','));
+        if (currentServices.length > 0) {
+          params.set('services', currentServices.join(','));
         }
-        if (languages.length > 0) {
-          params.set('languages', languages.join(','));
+        if (currentLanguages.length > 0) {
+          params.set('languages', currentLanguages.join(','));
         }
 
         const res = await fetch(`/api/search?${params.toString()}`);
