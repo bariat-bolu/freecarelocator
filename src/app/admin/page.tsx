@@ -8,6 +8,7 @@ interface SyncResult {
   success?: boolean;
   error?: string;
   total?: number;
+  total_missing?: number;
   created?: number;
   updated?: number;
   skipped?: number;
@@ -20,6 +21,8 @@ export default function AdminDashboard() {
   const [scdphResult, setScdphResult] = useState<SyncResult | null>(null);
   const [hrsaLoading, setHrsaLoading] = useState(false);
   const [scdphLoading, setScdphLoading] = useState(false);
+  const [zipResult, setZipResult] = useState<SyncResult | null>(null);
+  const [zipLoading, setZipLoading] = useState(false);
 
   async function handleSync(
     endpoint: string,
@@ -105,6 +108,90 @@ export default function AdminDashboard() {
                   Upload CSV
                 </Link>
               </div>
+            </div>
+            {/* ZIP Backfill */}
+            <div className="border-sage-muted/40 rounded-2xl border bg-white p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="font-display text-sage-text text-lg font-semibold">
+                    Backfill Missing ZIPs
+                  </h2>
+                  <p className="text-sage-text/50 mt-1 text-sm">
+                    Reverse geocode clinics that have coordinates but no ZIP
+                    code. Uses OpenStreetMap Nominatim (1 req/sec). May take
+                    several minutes for large batches.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    handleSync(
+                      '/api/admin/backfill-zips',
+                      setZipLoading,
+                      setZipResult
+                    )
+                  }
+                  disabled={zipLoading}
+                  className="bg-sage-primary hover:bg-sage-primary/90 shrink-0 rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {zipLoading ? (
+                    <span className="flex items-center gap-2">
+                      <svg
+                        className="h-4 w-4 animate-spin"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                      Backfilling…
+                    </span>
+                  ) : (
+                    'Backfill ZIPs'
+                  )}
+                </button>
+              </div>
+
+              {zipResult && Object.keys(zipResult).length > 0 && (
+                <div className="bg-sage-bg mt-4 rounded-xl p-4">
+                  {zipResult.error && !zipResult.success ? (
+                    <p className="text-sm text-red-600">{zipResult.error}</p>
+                  ) : (
+                    <div className="space-y-1 text-sm">
+                      <p className="text-sage-primary font-medium">
+                        Backfill complete
+                      </p>
+                      <p className="text-sage-text/70">
+                        Missing: {String(zipResult.total_missing ?? '—')} ·
+                        Updated: {zipResult.updated ?? '—'} · Skipped:{' '}
+                        {zipResult.skipped ?? '—'}
+                      </p>
+                      {zipResult.errors && zipResult.errors.length > 0 && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs text-red-500">
+                            {zipResult.errors.length} error(s)
+                          </summary>
+                          <ul className="mt-1 space-y-0.5 text-xs text-red-500/80">
+                            {zipResult.errors.map((e: string, i: number) => (
+                              <li key={i}>{e}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
