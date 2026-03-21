@@ -67,7 +67,7 @@ export async function backfillMissingZips(): Promise<BackfillResult> {
     .is('zip', null)
     .not('latitude', 'is', null)
     .not('longitude', 'is', null)
-    .limit(500);
+    .limit(45);
 
   if (error) {
     throw new Error(`Failed to fetch clinics: ${error.message}`);
