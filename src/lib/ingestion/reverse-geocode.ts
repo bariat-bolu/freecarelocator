@@ -67,7 +67,7 @@ export async function backfillMissingZips(): Promise<BackfillResult> {
     .is('zip', null)
     .not('latitude', 'is', null)
     .not('longitude', 'is', null)
-    .limit(45);
+    .limit(25);
 
   if (error) {
     throw new Error(`Failed to fetch clinics: ${error.message}`);
@@ -122,7 +122,7 @@ export async function backfillMissingZips(): Promise<BackfillResult> {
     }
 
     // Respect Nominatim rate limit: 1 request per second
-    await sleep(1100);
+    await sleep(2000);
   }
 
   return result;
