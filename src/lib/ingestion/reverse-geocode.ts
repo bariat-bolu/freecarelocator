@@ -28,27 +28,23 @@ async function reverseGeocodeZip(
   lat: number,
   lon: number
 ): Promise<string | null> {
-  const url = new URL('https://nominatim.openstreetmap.org/reverse');
-  url.searchParams.set('lat', String(lat));
-  url.searchParams.set('lon', String(lon));
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('addressdetails', '1');
-  url.searchParams.set('zoom', '18');
+  const url = new URL(
+    'https://api.bigdatacloud.net/data/reverse-geocode-client'
+  );
+  url.searchParams.set('latitude', String(lat));
+  url.searchParams.set('longitude', String(lon));
+  url.searchParams.set('localityLanguage', 'en');
 
   const response = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': 'FreeCareLocator/1.0 (admin backfill)',
-      Accept: 'application/json',
-    },
     signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
-    throw new Error(`Nominatim returned ${response.status}`);
+    throw new Error(`Geocoder returned ${response.status}`);
   }
 
   const data = await response.json();
-  const postcode = data?.address?.postcode;
+  const postcode = data?.postcode;
 
   return normalizeZip(postcode);
 }
@@ -67,7 +63,7 @@ export async function backfillMissingZips(): Promise<BackfillResult> {
     .is('zip', null)
     .not('latitude', 'is', null)
     .not('longitude', 'is', null)
-    .limit(25);
+    .limit(45);
 
   if (error) {
     throw new Error(`Failed to fetch clinics: ${error.message}`);
@@ -122,7 +118,7 @@ export async function backfillMissingZips(): Promise<BackfillResult> {
     }
 
     // Respect Nominatim rate limit: 1 request per second
-    await sleep(2000);
+    await sleep(300);
   }
 
   return result;
