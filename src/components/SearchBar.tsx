@@ -43,7 +43,7 @@ export default function SearchBar({
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="City, ZIP code, or clinic name…"
+            placeholder="Search by city, state or ZIP code"
             aria-label="Search by city, ZIP code, or clinic name"
             className="border-sage-muted text-sage-text placeholder:text-sage-muted focus:border-sage-primary focus:ring-sage-primary/20 w-full rounded-2xl border bg-white py-3.5 pr-4 pl-12 shadow-sm focus:ring-2 focus:outline-none"
           />
