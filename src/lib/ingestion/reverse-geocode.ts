@@ -28,14 +28,9 @@ async function reverseGeocodeZip(
   lat: number,
   lon: number
 ): Promise<string | null> {
-  const url = new URL(
-    'https://api.bigdatacloud.net/data/reverse-geocode-client'
-  );
-  url.searchParams.set('latitude', String(lat));
-  url.searchParams.set('longitude', String(lon));
-  url.searchParams.set('localityLanguage', 'en');
+  const url = `https://api.bigdatacloud.net/data/reverse-geocode?latitude=${lat}&longitude=${lon}&localityLanguage=en&key=bdc_c7e65fe041484445b339e42a498ea05e`;
 
-  const response = await fetch(url.toString(), {
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(10000),
   });
 
