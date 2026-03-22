@@ -15,9 +15,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: 'FreeCare Locator — Find Free & Low-Cost Healthcare in SC',
+  title: 'FreeCare Locator — Find Free & Low-Cost Healthcare',
   description:
-    'Search free and reduced-cost clinics across South Carolina. Community health centers, free clinics, and charitable care — all in one place.',
+    'Search free and reduced-cost clinics across the United States. Community health centers, free clinics, and charitable care — all in one place.',
 };
 
 export default function RootLayout({
