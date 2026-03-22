@@ -49,6 +49,118 @@ const searchParamsSchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+// ── State lookup map ────────────────────────────────────────────────────
+
+const STATE_LOOKUP: Record<string, string> = {
+  ALABAMA: 'AL',
+  ALASKA: 'AK',
+  ARIZONA: 'AZ',
+  ARKANSAS: 'AR',
+  CALIFORNIA: 'CA',
+  COLORADO: 'CO',
+  CONNECTICUT: 'CT',
+  DELAWARE: 'DE',
+  FLORIDA: 'FL',
+  GEORGIA: 'GA',
+  HAWAII: 'HI',
+  IDAHO: 'ID',
+  ILLINOIS: 'IL',
+  INDIANA: 'IN',
+  IOWA: 'IA',
+  KANSAS: 'KS',
+  KENTUCKY: 'KY',
+  LOUISIANA: 'LA',
+  MAINE: 'ME',
+  MARYLAND: 'MD',
+  MASSACHUSETTS: 'MA',
+  MICHIGAN: 'MI',
+  MINNESOTA: 'MN',
+  MISSISSIPPI: 'MS',
+  MISSOURI: 'MO',
+  MONTANA: 'MT',
+  NEBRASKA: 'NE',
+  NEVADA: 'NV',
+  'NEW HAMPSHIRE': 'NH',
+  'NEW JERSEY': 'NJ',
+  'NEW MEXICO': 'NM',
+  'NEW YORK': 'NY',
+  'NORTH CAROLINA': 'NC',
+  'NORTH DAKOTA': 'ND',
+  OHIO: 'OH',
+  OKLAHOMA: 'OK',
+  OREGON: 'OR',
+  PENNSYLVANIA: 'PA',
+  'RHODE ISLAND': 'RI',
+  'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD',
+  TENNESSEE: 'TN',
+  TEXAS: 'TX',
+  UTAH: 'UT',
+  VERMONT: 'VT',
+  VIRGINIA: 'VA',
+  WASHINGTON: 'WA',
+  'WEST VIRGINIA': 'WV',
+  WISCONSIN: 'WI',
+  WYOMING: 'WY',
+  'DISTRICT OF COLUMBIA': 'DC',
+  AL: 'AL',
+  AK: 'AK',
+  AZ: 'AZ',
+  AR: 'AR',
+  CA: 'CA',
+  CO: 'CO',
+  CT: 'CT',
+  DE: 'DE',
+  FL: 'FL',
+  GA: 'GA',
+  HI: 'HI',
+  ID: 'ID',
+  IL: 'IL',
+  IN: 'IN',
+  IA: 'IA',
+  KS: 'KS',
+  KY: 'KY',
+  LA: 'LA',
+  ME: 'ME',
+  MD: 'MD',
+  MA: 'MA',
+  MI: 'MI',
+  MN: 'MN',
+  MS: 'MS',
+  MO: 'MO',
+  MT: 'MT',
+  NE: 'NE',
+  NV: 'NV',
+  NH: 'NH',
+  NJ: 'NJ',
+  NM: 'NM',
+  NY: 'NY',
+  NC: 'NC',
+  ND: 'ND',
+  OH: 'OH',
+  OK: 'OK',
+  OR: 'OR',
+  PA: 'PA',
+  RI: 'RI',
+  SC: 'SC',
+  SD: 'SD',
+  TN: 'TN',
+  TX: 'TX',
+  UT: 'UT',
+  VT: 'VT',
+  VA: 'VA',
+  WA: 'WA',
+  WV: 'WV',
+  WI: 'WI',
+  WY: 'WY',
+  DC: 'DC',
+};
+
+function resolveState(input: string): string | null {
+  const trimmed = input.trim().toUpperCase();
+  return STATE_LOOKUP[trimmed] || null;
+}
+
 // ── Helper: extract client IP ───────────────────────────────────────────
 
 function getClientIp(request: NextRequest): string {
@@ -100,12 +212,66 @@ export async function GET(request: NextRequest) {
   const { q, radius, services, languages, limit, offset } = parsed.data;
 
   try {
-    // 3. Geocode the query to get a center point
-    const geo = await geocode(q);
-
     const supabase = await createClient();
     let results: Clinic[] = [];
     let geoInfo: SearchResponse['geo'] = null;
+
+    // 3. Check if this is a state-only search
+    const stateAbbr = resolveState(q);
+    if (stateAbbr) {
+      let stateQuery = supabase
+        .from('clinics')
+        .select('*')
+        .eq('is_approved', true)
+        .eq('state', stateAbbr)
+        .order('name');
+
+      if (services.length > 0) {
+        stateQuery = stateQuery.overlaps('services', services);
+      }
+      if (languages.length > 0) {
+        stateQuery = stateQuery.overlaps('languages', languages);
+      }
+
+      stateQuery = stateQuery.range(offset, offset + limit);
+
+      const { data, error } = await stateQuery;
+
+      if (error) {
+        console.error('State search error:', error);
+        return NextResponse.json(
+          { error: 'Search failed. Please try again.' },
+          { status: 500 }
+        );
+      }
+
+      results = (data as Clinic[]) || [];
+
+      const has_more = results.length > limit;
+      if (has_more) {
+        results = results.slice(0, limit);
+      }
+
+      results = deduplicateResults(results);
+
+      const response: SearchResponse = {
+        results,
+        pagination: { limit, offset, count: results.length, has_more },
+        geo: null,
+      };
+
+      return NextResponse.json(response, {
+        status: 200,
+        headers: {
+          'X-RateLimit-Limit': '30',
+          'X-RateLimit-Remaining': String(rl.remaining),
+          'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+        },
+      });
+    }
+
+    // 4. Geocode the query to get a center point
+    const geo = await geocode(q);
 
     if (geo) {
       // ── Geo radius search via PostGIS RPC ──
@@ -115,7 +281,7 @@ export async function GET(request: NextRequest) {
         radius_miles: radius,
         filter_services: services,
         filter_languages: languages,
-        result_limit: limit + 1, // Fetch one extra to detect has_more
+        result_limit: limit + 1,
         result_offset: offset,
       });
 
@@ -130,13 +296,12 @@ export async function GET(request: NextRequest) {
       results = (data as Clinic[]) || [];
       geoInfo = { lat: geo.lat, lon: geo.lon, radius_miles: radius };
     } else {
-      // ── Fallback: text-based search (no geocodable match) ──
-      // Try matching clinic names directly as a last resort
+      // ── Fallback: text-based search ──
       let query = supabase
         .from('clinics')
         .select('*')
         .eq('is_approved', true)
-        .ilike('name', `%${q}%`)
+        .ilike('city', `%${q}%`)
         .order('name');
 
       if (services.length > 0) {
@@ -146,7 +311,7 @@ export async function GET(request: NextRequest) {
         query = query.overlaps('languages', languages);
       }
 
-      query = query.range(offset, offset + limit); // Fetch limit+1 for has_more
+      query = query.range(offset, offset + limit);
 
       const { data, error } = await query;
 
@@ -161,16 +326,16 @@ export async function GET(request: NextRequest) {
       results = (data as Clinic[]) || [];
     }
 
-    // 4. Determine pagination
+    // 5. Determine pagination
     const has_more = results.length > limit;
     if (has_more) {
-      results = results.slice(0, limit); // Trim the extra row
+      results = results.slice(0, limit);
     }
 
-    // 5. Deduplicate cross-source matches
+    // 6. Deduplicate cross-source matches
     results = deduplicateResults(results);
 
-    // 6. Build response
+    // 7. Build response
     const response: SearchResponse = {
       results,
       pagination: {
@@ -219,7 +384,6 @@ function deduplicateResults(clinics: Clinic[]): Clinic[] {
       continue;
     }
 
-    // Keep the record with more complete data
     const existingScore = completenessScore(existing);
     const newScore = completenessScore(clinic);
 
