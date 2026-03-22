@@ -124,8 +124,29 @@ export async function geocode(input: string): Promise<GeoResult | null> {
       .not('longitude', 'is', null)
       .limit(100);
 
-    if (!data || data.length === 0) return null;
-    return computeCentroid(data);
+    if (data && data.length > 0) return computeCentroid(data);
+
+    // ZIP not in our database — try Nominatim to get coordinates
+    try {
+      const nominatimUrl = `https://nominatim.openstreetmap.org/search?postalcode=${input}&country=US&format=json&limit=1`;
+      const res = await fetch(nominatimUrl, {
+        headers: { 'User-Agent': 'FreeCareLocator/1.0' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const results = await res.json();
+        if (results.length > 0) {
+          return {
+            lat: parseFloat(results[0].lat),
+            lon: parseFloat(results[0].lon),
+          };
+        }
+      }
+    } catch {
+      // Nominatim failed — fall through to null
+    }
+
+    return null;
   }
 
   // Check if input is a state abbreviation or full state name
