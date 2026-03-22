@@ -46,27 +46,22 @@ export interface SearchFilters {
 // Known service and language options for filter UI
 export const SERVICE_OPTIONS = [
   'Primary Care',
-  'Dental',
-  'Vision',
   'Mental Health',
   'Pharmacy',
-  'Pediatrics',
-  "Women's Health",
-  'Substance Abuse',
   'Lab / Imaging',
-  'Telehealth',
+  'Child Health',
+  'Children with Special Health Care Needs',
+  'Family Planning',
+  'Family Support Services',
+  'Immunizations',
+  'STD/HIV',
+  'Tuberculosis',
+  'Epidemiology',
+  'Vital Records',
+  'WIC',
 ] as const;
 
-export const LANGUAGE_OPTIONS = [
-  'English',
-  'Spanish',
-  'Vietnamese',
-  'Chinese',
-  'Korean',
-  'French',
-  'Arabic',
-  'ASL',
-] as const;
+export const LANGUAGE_OPTIONS = ['English', 'Spanish'] as const;
 // ── API response type ───────────────────────────────────────────────────
 
 export interface SearchResponse {
