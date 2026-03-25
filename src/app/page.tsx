@@ -48,10 +48,6 @@ function HomePageInner() {
     [router]
   );
 
-  /**
-   * Runs a search. When called with explicit params (from the mount effect),
-   * uses those. Otherwise reads from React state (for user-triggered searches).
-   */
   async function runSearch(opts?: {
     q: string;
     r: number;
@@ -143,7 +139,6 @@ function HomePageInner() {
     setLanguages([]);
   }
 
-  // On mount: if URL has a query, re-run the search using URL values directly
   useEffect(() => {
     if (initialQuery.trim()) {
       runSearch({
@@ -220,6 +215,15 @@ function HomePageInner() {
             </div>
           )}
         </section>
+
+        {/* Account benefit hint — only show to guests before searching */}
+        {!loading && !hasSearched && (
+          <div className="mx-auto mt-6 max-w-2xl px-6 text-center">
+            <p className="text-sage-text/40 text-xs">
+              Create a free account to save clinics and access them anytime.
+            </p>
+          </div>
+        )}
 
         <section className="px-6 py-8">
           <SearchResults
