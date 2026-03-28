@@ -11,7 +11,7 @@ export function createAdminClient() {
 
   if (!url || !serviceKey) {
     throw new Error(
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVraGJic3Fza2hidWxpZG9jdG9lIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTk2Njk3OSwiZXhwIjoyMDg3NTQyOTc5fQ.qx4KC7_8kRWjBoHgxiLjgApUH3sPuJSkLnrPJb_s6vw'
+      'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY'
     );
   }
 
